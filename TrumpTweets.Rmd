@@ -1,0 +1,213 @@
+---
+title: "Text Analysis of Trumps tweets"
+author: "Akshaya Mahesh"
+date: "11/25/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Installing Packages
+```{r eval=FALSE, echo=FALSE}
+install.packages(c('tokenizers','tidytext','stringr','glmnet'))
+```
+
+Adding libraries
+```{r warning=FALSE,message=FALSE}
+library(plyr)
+library(tidyverse)
+library(ggplot2)
+library(readr)
+library(dplyr)
+library(modelr)
+library(broom)
+library(mlbench)
+library(gridExtra)
+library(grid)
+library(scales)
+library(tidytext)
+library(tokenizers)
+library(glmnet)
+```
+
+Downloading and Importing the dataset    
+Printing first few rows of the dataset using head()    
+```{r}
+df_all <-read.csv("C:\\Users\\maksh\\OneDrive\\Documents\\realDonaldTrump-20201106.csv")
+dt_tweets <-as_tibble(df_all)
+dt_tweets$id<- format(dt_tweets$id, scientific = 50)
+head(dt_tweets)
+
+```
+
+We then structure the tweets into a tidy format by using token = "tweets" tokenizer.  
+Filtering the dataset by removing retweets, stop words, spaces, "&amp", variations in Trump's names,
+URLs and twitter usernames.  
+
+```{r}
+tidy_tweets<-dt_tweets %>% filter(isRetweet=="f") %>%
+     unnest_tokens(input=text, output = "word", token = "tweets",strip_url=TRUE) %>%
+     anti_join(stop_words,by="word")%>%
+  filter(!str_detect(word,'realdonaldtrump'))%>%
+  filter(!str_detect(word,'trump'))%>%
+  filter(!str_detect(word,'donald'))%>%
+  filter(!str_detect(word,'[:space:]')) %>%
+  filter(!str_detect(word,"https"))%>%
+  filter(!str_detect(word,"@"))%>%
+  filter(!str_detect(word,"&amp"))%>%
+  filter(!str_detect(word,"amp"))
+
+```
+Printing the first few rows of the new dataframe 
+```{r}
+head(tidy_tweets)
+
+```
+
+Visualization plot of the top 20 most common words of Trump's tweets over these years  
+```{r}
+tidy_tweets %>%
+  count(word, sort=TRUE) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  geom_col() +
+  coord_flip() +
+  labs(x="Word", y="Count",
+       title="Top 20 most common terms from Trump's Tweets") +
+  theme_minimal()
+```
+From the above plot, the word "President" seem to be the most used word in Trump's tweets and has a count close to 3000. This word is followed by the word "people" which, seems to have a count close to "President".  
+Top 5 words are : President, people, country, america and time.  
+
+
+Converting the datetime format of `date` to Year format  
+```{r}
+tidy_tweets$date<-format(as.Date(tidy_tweets$date,format = "%Y-%m-%d %H:%M:%S"),"%Y")
+```
+Renaming column `date` to `year` and filtering the years 2015 to 2020  
+```{r}
+tidy_tweets_year<-tidy_tweets %>%
+  rename(year=date) %>%
+  filter(between(year,2015,2020))
+  
+```
+Printing the first few rows of the new dataframe
+```{r}
+head(tidy_tweets_year)
+```
+Visualization plot of the top 20 most common terms in Trump's tweets faceted by `year` from 2015 to 2020  
+```{r warning=FALSE,message=FALSE}
+tidy_tweets_year %>%
+  group_by(year) %>%
+  count(word, sort=TRUE) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder_within(word, n, year), y=n,fill=year)) +
+  geom_col(show.legend = FALSE) +
+    facet_wrap(~year,scales="free")+
+  coord_flip() +
+  labs(x="Word", y="Count",
+       title="Top 20 most common terms of Trump's tweets from 2015-2020") +
+    scale_fill_brewer(palette = "Set2")+
+  scale_x_reordered()+
+    scale_y_discrete(guide = guide_axis(n.dodge = 4))
+  theme_minimal()
+```
+Few Observations:  
+
+From the above plots,some of the words such as president, america,people seems to appear very common in Trump's tweets for the years2015-2020.
+"People" seems to be the most common word for 3 years(2017, 2018 and 2020), "President" for 2 years(2015,2019).  
+"Poll" seems to be in Top 20 for the years 2015 and 2016 which can be attributed to the elections.   
+"#makeamericagreatagain" seems to have been one of the most commonly tweeted terms owing to the elections then.  
+2016 is the only year which has a person's name (Hillary) as the most commonly tweeted word.  
+Only 2 other countries(apart from America) have been mentioned by Trump and are in Top 20 and they are, Russia(2017) and China(2019,2020). 
+Current US President,Biden is the second most tweeted word in 2020 by Trump owing to the latest presidential campaign.  
+
+By treating `year` as a "document" to calculate the tf-idf for each term and year.  
+The tf-idf terms are then arranged in descending order.  
+```{r}
+tidy_tweet_tf_idf<- tidy_tweets_year%>%
+  count(year,word,sort=TRUE) %>%
+  bind_tf_idf(term=word,document = year,n=n)
+
+arrange(tidy_tweet_tf_idf,desc(tf_idf))
+```
+The above table shows the most characteristics terms by weight from Trump's tweets for the years 2015 to 2020.  
+
+
+Visualization plot for the top 20 Characteristic terms of Trump's tweets
+```{r warning=FALSE,message=FALSE}
+tidy_tweet_tf_idf%>%
+  group_by(year) %>%
+  top_n(20,wt=tf_idf) %>%
+  ggplot(aes(x=reorder_within(word, tf_idf, year), y=tf_idf,fill=year)) +
+  geom_col(show.legend = FALSE) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x=element_blank())+
+  facet_wrap(~year,scales="free")+
+  coord_flip() +
+  labs(x="Word", y="TF-IDF",
+       title="Top 20 characteristics terms of Trump's tweets",
+       fill="Time Period") +
+    scale_fill_brewer(palette = "Set2")+
+    scale_x_reordered()+
+  theme(axis.text.y = element_text(size=8))
+```
+From the above plots, below are the observations for the Top 20 Characteristic terms for the years 2015 to 2020:    
+Year 2019 seems to have a higher range of TF-IDF values followed by the year 2020.     
+Year 2017 seems to have lesser range of TF-IDF values when compared to other years.      
+Coronavirus and virus are the most characteristic terms of 2020 attributing to the ongoing pandemic.  
+witch and hunt have been used in the years 2018 and 2019.  
+Impeachment seems to be the most characteristic term for 2019 owing to political situation then.  
+
+Filtering data to include only tweets from 2016 to 2020 and fitting sparse regression models to predict the number of retweets that a tweet will get.  
+
+```{r}
+tidy_tweets_new<-tidy_tweets %>%
+  filter(date >=2016)%>%
+  count(id,word)%>%
+  cast_sparse(id,word,n)
+tidy_tweets_new_rows<-tibble(id=rownames(tidy_tweets_new))
+tidy_tweets_full<-left_join(tidy_tweets_new_rows,dt_tweets)
+```
+
+Fitting the model
+```{r}
+set.seed(1234)
+fit1<-glmnet(tidy_tweets_new,tidy_tweets_full$retweets)
+plot(fit1,xvar="lambda",label=TRUE)
+```
+Value of lambda (sparsity parameter) is determined using crossvalidation 
+```{r}
+set.seed(1234)
+cvfit<-cv.glmnet(tidy_tweets_new,tidy_tweets_full$retweets)
+plot(cvfit)
+```
+
+The number of non-zero coefficients are as follows
+```{r}
+c1<-coef(cvfit,s="lambda.min")
+sum(c1 !=0)
+```
+
+```{r}
+c2<-coef(cvfit,s="lambda.1se")
+sum(c2 != 0)
+```
+
+```{r}
+cvfit
+```
+`c2` seems to be a better model since lambda.1se returns lesser non-zero coefficients, we take this to be our lambda (value = 805) and the number of non-zero coefficients returned is 32.  
+
+Extracting the coefficients from the best model from the above model to visualize the terms with the strongest positive relationship with the number of retweets.
+```{R}
+coef_term <-as.data.frame(as.matrix(c2)) %>%
+  rename(coef=1)%>%
+  filter(coef !=0)
+arrange(coef_term,desc(coef))
+```
+The word "#fnn" seems to be the word that has the strongest positive relationship with the number of retweets
+followed by "quarantine" owing to the ongoing pandemic situation.
+
